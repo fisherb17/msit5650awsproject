@@ -1,17 +1,14 @@
 #!/bin/bash
 set -e
 
-# simple bootstrapping: install python3, pip, flask, boto3; write a small Flask upload app
 apt update -y
 apt install -y python3 python3-pip nginx
 pip3 install flask boto3
 
-# create app folder
 mkdir -p /var/www/html
 cd /var/www/html
 
-# write the Flask app that uploads to S3
-cat << 'EOF' > /var/www/html/upload_app.py
+cat << EOF > /var/www/html/upload_app.py
 from flask import Flask, request, render_template_string
 import boto3
 import os
@@ -42,10 +39,9 @@ def upload_file():
     if request.method == "POST":
         f = request.files.get("file")
         if f:
-            key = f.filename
             try:
-                s3.upload_fileobj(f, S3_BUCKET, key)
-                message = f"<p>Successfully uploaded '{key}' to S3 bucket {S3_BUCKET}.</p>"
+                s3.upload_fileobj(f, S3_BUCKET, f.filename)
+                message = f"<p>Successfully uploaded '{f.filename}' to {S3_BUCKET}.</p>"
             except ClientError as e:
                 message = f"<p>Upload failed: {str(e)}</p>"
     return render_template_string(HTML, message=message)
@@ -54,11 +50,9 @@ if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
 EOF
 
-# set environment variable for S3 bucket (this will be injected by Terraform via user-data templating)
 echo "S3_BUCKET=${s3_bucket}" >> /etc/environment
 source /etc/environment
 
-# systemd service to run the Flask app
 cat << 'EOF' > /etc/systemd/system/uploadapp.service
 [Unit]
 Description=Flask Upload App
@@ -79,14 +73,13 @@ systemctl daemon-reload
 systemctl enable uploadapp
 systemctl start uploadapp
 
-# configure nginx as a reverse proxy (optional, allows HTTP on port 80)
 cat << 'EOF' > /etc/nginx/sites-available/uploadapp
 server {
     listen 80;
     location / {
         proxy_pass http://127.0.0.1:8080;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
     }
 }
 EOF
